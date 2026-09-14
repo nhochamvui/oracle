@@ -19,7 +19,7 @@ name: oci-arm-retry
 # always-on box instead. Manual bursts: Actions tab -> Run workflow.
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 # Never let two sweeps overlap.
