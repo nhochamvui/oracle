@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# NEVER commit OCI credentials
+.oci/
+*.pem
+
+# misc
+*.log
