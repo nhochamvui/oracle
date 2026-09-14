@@ -22,7 +22,7 @@ import oci
 COMPARTMENT_ID = "ocid1.tenancy.oc1..aaaaaaaapcxrvac7jqbc7nbbdwznq72m4c3lj6uvu5ztluqch7lrzyloc5tq"
 # Subnet OCID — MUST start with "ocid1.subnet." (a VCN starts with "ocid1.vcn.")
 SUBNET_ID      = "ocid1.subnet.oc1.ap-kulai-2.aaaaaaaa4o5pvfpgzqoeuqfhb6uumj2sn5cooz6bntg3qg3q7ectn6lf6nra"
-IMAGE_ID       = "ocid1.image.oc1.ap-kulai-2.aaaaaaaaqjq4j22krb36x43ptnejsyvrc25qcxxlwuoqr34cati3o7sixezq"
+IMAGE_ID       = "ocid1.image.oc1.ap-kulai-2.aaaaaaaanokvwobk6msr2oxc4wdj4s7ercilhjg7mzqy57qqmfuyepewxtqa"
 SHAPE          = "VM.Standard.A1.Flex"
 OCPUS          = 2        # Always Free limit = 2 OCPU / 12 GB (since Jun 2026)
 MEMORY_GB      = 12
