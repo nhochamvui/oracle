@@ -3,16 +3,14 @@
 retry-sdk.py — poll OCI for Always Free ARM (Ampere A1) capacity and launch the
 instant it appears. Uses the official OCI Python SDK.
 
-Setup:
-    pip install oci
-    # reuse the SAME credential file the OCI CLI uses (~/.oci/config)
+Modes:
+    python retry-sdk.py            # loop forever (always-on host)
+    python retry-sdk.py --once     # one sweep, then exit (GitHub Actions)
+    python retry-sdk.py --check    # only validate config/OCIDs, then exit
 
-Run forever (always-on host):   python retry-sdk.py
-Run a single sweep (CI/cron):   python retry-sdk.py --once
-
-Exit codes (for CI):
-    0  = launched, OR no capacity yet (both are "fine" outcomes)
-    1  = a real error (bad credentials, wrong OCID, non-arm image, ...)
+Exit codes:
+    0 = launched OR no capacity yet (both fine) / check passed
+    1 = a real error (bad credentials, wrong OCID, non-arm image, ...)
 """
 import sys
 import time
@@ -21,19 +19,21 @@ import logging
 import oci
 
 # --------------------------- EDIT THESE ---------------------------
-COMPARTMENT_ID = "ocid1.tenancy.oc1..aaaaaaaapcxrvac7jqbc7nbbdwznq72m4c3lj6uvu5ztluqch7lrzyloc5tq"  # or the tenant OCID
+COMPARTMENT_ID = "ocid1.tenancy.oc1..aaaaaaaapcxrvac7jqbc7nbbdwznq72m4c3lj6uvu5ztluqch7lrzyloc5tq"
+# Subnet OCID — MUST start with "ocid1.subnet." (a VCN starts with "ocid1.vcn.")
 SUBNET_ID      = "ocid1.vcn.oc1.ap-kulai-2.amaaaaaasrq4isia7u3whevlmmjmyx5bydqvygwewu3acfvtbzlkz64icyjq"
-IMAGE_ID       = "ocid1.image.oc1.ap-kulai-2.aaaaaaaaqjq4j22krb36x43ptnejsyvrc25qcxxlwuoqr34cati3o7sixezq"        # arm64 image
+IMAGE_ID       = "ocid1.image.oc1.ap-kulai-2.aaaaaaaaqjq4j22krb36x43ptnejsyvrc25qcxxlwuoqr34cati3o7sixezq"
 SHAPE          = "VM.Standard.A1.Flex"
 OCPUS          = 2        # Always Free limit = 2 OCPU / 12 GB (since Jun 2026)
 MEMORY_GB      = 12
 DISPLAY_NAME   = "free-arm"
-SLEEP_SECONDS  = 90       # wait between full sweeps (only used in loop mode)
+SLEEP_SECONDS  = 90       # wait between full sweeps (loop mode only)
 AVAILABILITY_DOMAINS = [] # leave empty to auto-discover every AD in the region
 CHECK_EXISTING = True     # skip work if a matching A1 instance already exists
 # ------------------------------------------------------------------
 
-ONCE = "--once" in sys.argv
+ONCE  = "--once" in sys.argv
+CHECK = "--check" in sys.argv
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
@@ -50,8 +50,82 @@ compartment = (COMPARTMENT_ID
                else config["tenancy"])
 
 identity = oci.identity.IdentityClient(config)
-compute = oci.core.ComputeClient(config)
+compute  = oci.core.ComputeClient(config)
+network  = oci.core.VirtualNetworkClient(config)
 
+log.info("region=%s", config["region"])
+
+
+def preflight():
+    """Validate every OCID up-front, so failures are specific, not a vague 404."""
+    ok = True
+
+    # -- Compartment / tenancy --------------------------------------------
+    if (COMPARTMENT_ID.startswith("ocid1.compartment.")
+            or COMPARTMENT_ID.startswith("ocid1.tenancy.")):
+        try:
+            obj = (identity.get_tenancy(compartment).data
+                   if compartment.startswith("ocid1.tenancy")
+                   else identity.get_compartment(compartment).data)
+            log.info("OK  compartment: %s", obj.name)
+        except Exception as e:                   # noqa: BLE001
+            ok = False
+            log.error("BAD COMPARTMENT_ID: %s", e)
+    else:
+        ok = False
+        log.error("COMPARTMENT_ID is not a compartment/tenancy OCID: '%s...'",
+                  COMPARTMENT_ID[:32])
+
+    # -- Image -------------------------------------------------------------
+    if IMAGE_ID.startswith("ocid1.image."):
+        try:
+            img = compute.get_image(IMAGE_ID).data
+            log.info("OK  image: %s (%s)", img.display_name, img.operating_system)
+            low = (img.display_name or "").lower()
+            if "aarch64" not in low and "arm" not in low:
+                log.warning("    -> image name doesn't look arm64; A1.Flex needs "
+                            "an aarch64 image")
+        except Exception as e:                   # noqa: BLE001
+            ok = False
+            log.error("BAD IMAGE_ID (%s...): %s", IMAGE_ID[:32], e)
+            log.error("    -> platform image OCIDs are REGION-SPECIFIC. Get the "
+                      "aarch64 Ubuntu OCID for region '%s' from", config["region"])
+            log.error("       https://docs.oracle.com/iaas/images/")
+    else:
+        ok = False
+        log.error("IMAGE_ID is not an image OCID: '%s...'", IMAGE_ID[:32])
+
+    # -- Subnet (the usual culprit) ---------------------------------------
+    if SUBNET_ID.startswith("ocid1.subnet."):
+        try:
+            sn = network.get_subnet(SUBNET_ID).data
+            log.info("OK  subnet: %s (vcn=%s)", sn.display_name, sn.vcn_id)
+        except Exception as e:                   # noqa: BLE001
+            ok = False
+            log.error("BAD SUBNET_ID (%s...): %s", SUBNET_ID[:32], e)
+            log.error("    -> subnets are region-specific; use a PUBLIC subnet in "
+                      "region '%s'", config["region"])
+    else:
+        ok = False
+        kind = SUBNET_ID.split(".")[0] if SUBNET_ID else "empty"
+        log.error("SUBNET_ID is not a subnet OCID (got '%s...'). A subnet starts "
+                  "with 'ocid1.subnet.'", SUBNET_ID[:32])
+        log.error("    -> you pasted a '%s' OCID. In the Console go to "
+                  "Networking -> Virtual Cloud Networks -> <your VCN> -> Subnets "
+                  "-> click the subnet -> copy ITS OCID.", kind)
+
+    return ok
+
+
+if not preflight():
+    log.error("Preflight failed: fix the OCID(s) flagged above and commit again.")
+    sys.exit(1)
+
+if CHECK:
+    log.info("--check: all OCIDs OK.")
+    sys.exit(0)
+
+# ---- Discover availability domains -----------------------------------
 if AVAILABILITY_DOMAINS:
     ads = AVAILABILITY_DOMAINS
 else:
@@ -59,7 +133,7 @@ else:
            identity.list_availability_domains(
                compartment_id=config["tenancy"]).data]
 
-log.info("region=%s  ADs=%s", config["region"], ads)
+log.info("ADs=%s", ads)
 log.info("target shape=%s  %s OCPU / %s GB", SHAPE, OCPUS, MEMORY_GB)
 
 
