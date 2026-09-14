@@ -21,9 +21,9 @@ import logging
 import oci
 
 # --------------------------- EDIT THESE ---------------------------
-COMPARTMENT_ID = "ocid1.compartment.oc1..CHANGEME"  # or the tenant OCID
-SUBNET_ID      = "ocid1.subnet.oc1..CHANGEME"
-IMAGE_ID       = "ocid1.image.oc1..CHANGEME"        # arm64 image
+COMPARTMENT_ID = "ocid1.tenancy.oc1..aaaaaaaapcxrvac7jqbc7nbbdwznq72m4c3lj6uvu5ztluqch7lrzyloc5tq"  # or the tenant OCID
+SUBNET_ID      = "ocid1.vcn.oc1.ap-kulai-2.amaaaaaasrq4isia7u3whevlmmjmyx5bydqvygwewu3acfvtbzlkz64icyjq"
+IMAGE_ID       = "ocid1.image.oc1.ap-kulai-2.aaaaaaaaqjq4j22krb36x43ptnejsyvrc25qcxxlwuoqr34cati3o7sixezq"        # arm64 image
 SHAPE          = "VM.Standard.A1.Flex"
 OCPUS          = 2        # Always Free limit = 2 OCPU / 12 GB (since Jun 2026)
 MEMORY_GB      = 12
