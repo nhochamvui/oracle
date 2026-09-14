@@ -1,0 +1,64 @@
+# .github/workflows/oci-arm-retry.yml
+#
+# Keep trying to launch an OCI Always Free ARM instance from GitHub Actions.
+# Copy this file into your repo at: .github/workflows/oci-arm-retry.yml
+# Put retry-sdk.py in the repo ROOT (see the "Checkout" step below).
+#
+# Repo secrets to create (Settings -> Secrets and variables -> Actions):
+#   OCI_CONFIG  = full contents of your ~/.oci/config
+#   OCI_API_KEY = full contents of your ~/.oci/oci_api_key.pem  (the PRIVATE key)
+#
+# Keep the repo PRIVATE (the secrets are safe in Actions, but a private repo is
+# the right call for cloud credentials).
+name: oci-arm-retry
+
+# ---- Schedule ---------------------------------------------------------------
+# Every 30 min = 48 runs/day. At ~1 billed minute each that's ~1,440 of the
+# 2,000 free minutes/month for a private repo. Going to */5 would burn the whole
+# quota in about a week. Want tighter timing? Add paid minutes, or run it on an
+# always-on box instead. Manual bursts: Actions tab -> Run workflow.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+# Never let two sweeps overlap.
+concurrency:
+  group: oci-arm-retry
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6            # hard cap so a hang can't eat your quota
+    steps:
+      - name: Checkout (provides retry-sdk.py)
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OCI SDK
+        run: pip install --quiet oci
+
+      - name: Write OCI credentials
+        env:
+          OCI_CONFIG: ${{ secrets.OCI_CONFIG }}
+          OCI_API_KEY: ${{ secrets.OCI_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.oci"
+          printf '%s\n' "$OCI_CONFIG"  > "$HOME/.oci/config"
+          printf '%s\n' "$OCI_API_KEY" > "$HOME/.oci/oci_api_key.pem"
+          chmod 700 "$HOME/.oci"
+          chmod 600 "$HOME/.oci/config" "$HOME/.oci/oci_api_key.pem"
+          # Force key_file to the runner path, whatever your local config said.
+          sed -i "s|^[[:space:]]*key_file=.*|key_file=$HOME/.oci/oci_api_key.pem|" "$HOME/.oci/config"
+
+      - name: Try to launch the free ARM instance
+        run: python retry-sdk.py --once
